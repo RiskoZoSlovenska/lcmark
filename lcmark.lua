@@ -1,10 +1,8 @@
 local cmark = require("cmark")
-local lpeg = require("lpeg")
+local re = require("re")
 
-local S, C, P, R, V, Ct =
-  lpeg.S, lpeg.C, lpeg.P, lpeg.R, lpeg.V, lpeg.Ct
-local nl = P"\r\n" + P"\r" + P"\n"
-local sp = S" \t"^0
+local sp = re.compile(" [ \t] ")
+local nl = re.compile(" ('\r\n') / ('\r') / ('\n') ")
 
 local lcmark = {}
 
@@ -158,16 +156,19 @@ local convert_metadata = function(table, options)
                     end, false)
 end
 
-local yaml_begin_line = P"---" * sp * nl
-local yaml_end_line = (P"---" + P"...") * sp * nl
-local yaml_content_line = -yaml_end_line * P(1 - S"\r\n")^0 * nl
-local yaml_block = yaml_begin_line * (yaml_content_line^1 + sp) * yaml_end_line
+local yaml_block = re.compile([[
+  Block <- Begin (Content+ / %sp) End
+  Begin <- "---" Eol
+  Content <- !End (!Eol .)* Eol
+  End <- ("---" / "...") Eol
+  Eol <- %sp* %nl
+]], { sp = sp, nl = nl })
 
 -- Parses document with optional front YAML metadata; returns document,
 -- metadata.
 local parse_document_with_metadata = function(inp, parser, options)
   local metadata = {}
-  local meta_end = lpeg.match(yaml_block, inp)
+  local meta_end = re.match(inp, yaml_block)
   if meta_end then
     if meta_end then
       local ok, yaml_meta, err = pcall(parser, string.sub(inp, 1, meta_end))
@@ -294,65 +295,72 @@ local forloop = function(var, inner, sep)
   end
 end
 
--- Template syntax.
-local TemplateGrammar = Ct{"Main",
-  Main = V"Template" * (-1 + lpeg.Cp()),
-  Template = Ct((V"Text" +
-                 V"EscapedDollar" +
-                 V"ConditionalNl" +
-                 V"Conditional" +
-                 V"ForLoopNl" +
-                 V"ForLoop" +
-                 V"Var")^0),
-  EscapedDollar = P"$$" / "$",
-  -- the Nl forms eat an extra newline after the end, if the
-  -- opening if() or for() ends with a newline.  This is to avoid
-  -- excess blank space when a document contains many ifs or fors
-  -- that evaluate to false.
-  ConditionalNl = P"$if(" * Ct(V"Variable") * P")$" * nl * Ct(V"Template") *
-    (P"$else$" * Ct(V"Template"))^-1 * P"$endif$" * nl / conditional,
-  ForLoopNl = P"$for(" * Ct(V"Variable") * P")$" * nl * Ct(V"Template") *
-    (P"$sep$" * Ct(V"Template"))^-1 * P"$endfor$" * nl / forloop,
-  Conditional = P"$if(" * Ct(V"Variable") * P")$" * Ct(V"Template") *
-    (P"$else$" * Ct(V"Template"))^-1 * P"$endif$" / conditional,
-  ForLoop = P"$for(" * Ct(V"Variable") * P")$" * Ct(V"Template") *
-    (P"$sep$" * Ct(V"Template"))^-1 * P"$endfor$" / forloop,
-  Text = C((1 - P"$")^1),
-  Reserved = P"if$" + P"endif$" + P"else$" + P"for$" + P"endfor$" + P"sep$",
-  VarPart = (R"az" + R"AZ" + R"09" + S"_-")^1,
-  Variable = C(V"VarPart") * (P"." * C(V"VarPart"))^0,
-  Var = P"$" * - V"Reserved" * Ct(V"Variable") * P"$" /
-    function(var)
-      return function(ctx)
-        local val = get_value(var, ctx)
-        if is_truthy(val) then
-          return tostring(val)
-        else
-          return ""
-        end
-      end
-    end,
-}
+local variable = function(ref)
+  return function(ctx)
+    local val = get_value(ref, ctx)
+    if is_truthy(val) then
+      return tostring(val)
+    else
+      return ""
+    end
+  end
+end
+
+local TemplateGrammar = re.compile([[
+  Main <- Template (!. / {})
+  Template <- {| (
+                (ConditionalNl / Conditional) -> conditional /
+                (ForLoopNl / ForLoop) -> forloop /
+                Variable -> variable /
+                EscapedDollar /
+                Any
+              )* |}
+
+  -- The Nl forms eat an extra newline after the end, but only if the opening
+  -- if() or for() ends with a newline (which is also consumed).  This is to
+  -- avoid excess blank space when a document contains many ifs or fors that
+  -- evaluate to false.
+
+  ConditionalNl <- "$if(" Reference ")$" %nl Template ("$else$" Template)?
+                    "$endif$" %nl
+  Conditional   <- "$if(" Reference ")$"     Template ("$else$" Template)?
+                    "$endif$"
+
+  ForLoopNl <- "$for(" Reference ")$" %nl Template ("$sep$" Template)?
+                "$endfor$" %nl
+  ForLoop   <- "$for(" Reference ")$"     Template ("$sep$" Template)?
+                "$endfor$"
+
+  Variable <- "$" !(Reserved "$") Reference "$"
+
+  Reference <- {| Name ("." Name)* |}
+  Name <- { [a-zA-Z0-9_-]+ }
+  Reserved <- "if" / "endif" / "else" / "for" / "endfor" / "sep"
+
+  EscapedDollar <- "$$" -> "$"
+  Any <- { [^$]+ }
+]], {
+  conditional = conditional,
+  forloop = forloop,
+  variable = variable,
+  nl = nl,
+})
 
 -- Compiles a template string into an  arbitrary template object
 -- which can then be passed to `lcmark.apply_template()`.
 -- Returns the template object on success, or `nil, msg` on failure.
-lcmark.compile_template = function(tpl)
-  local matches = lpeg.match(TemplateGrammar, tpl, nil)
-  if matches[2] == nil then
-    if matches[1] == nil then
-      return nil, "parse failed at the end of the template"
-    else
-      return matches[1]
-    end
+lcmark.compile_template = function(template_str)
+  local compiled, fail_pos = re.match(template_str, TemplateGrammar)
+
+  if fail_pos then
+    local _, line_num = template_str:sub(1, fail_pos):gsub('[^\n\r]+', '')
+    return nil, string.format("parse failure at line %d: '%s'", line_num,
+                              template_str:sub(fail_pos, fail_pos + 40)
+                             )
+  elseif not compiled then
+    return nil, "parse failed at the end of the template"
   else
-    local line_num = 1
-    local parse_failure_pos = matches[2]
-    tpl:sub(1,parse_failure_pos):gsub('[^\n]*[\n]',
-            function() line_num = line_num + 1 end)
-    return nil, ("parse failure at line " .. line_num ..
-                  ": '" .. string.sub(tpl, parse_failure_pos,
-                                      parse_failure_pos + 40) .. "'")
+    return compiled, nil
   end
 end
 
