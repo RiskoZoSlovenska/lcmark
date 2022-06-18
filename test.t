@@ -20,7 +20,7 @@ local render_template = lcmark.render_template
 subtest("template tests", function()
   local res, msg = render_template("$", {})
   is(res, nil, "unescaped $")
-  is(msg, "parse failure at line 1: '$'", "error message for parse failure")
+  is(msg, "parse failure on line 1 near '$'", "error message for parse failure")
   is(render_template("foo$$bar$$baz", {}),
     "foo$bar$baz", "escaped $")
   is(render_template("foo $bar$", {bar = "bim"}),
@@ -65,6 +65,11 @@ end)
 local body, meta, msg = lcmark.convert("Hello *world*", "latex", {})
 is(body, "Hello \\emph{world}\n", "simple latex body")
 eq_array(meta, {}, "simple latex meta")
+
+local body, meta, msg = lcmark.convert("Hello *world*", "notaformat", {})
+nok(body, "convert fails on bad to")
+nok(meta, "convert fails on bad to")
+is(msg, "unknown output format 'notaformat'", "error message on bad to")
 
 local body, meta, msg = lcmark.convert("dog's", "man", {smart = true})
 is(body, ".PP\ndog\\[cq]s\n", "smart apostrophe")
@@ -130,12 +135,12 @@ like(msg, "tests/bad_filter%.lua:2: '?<name>'? expected near '%('", "error messa
 
 local badfilter, msg = lcmark.load_filter("tests/bad_filter2.lua")
 nok(badfilter, "load_filter fails when script doesn't return a function")
-is(msg, "Filter tests/bad_filter2.lua returns a table, not a function", "error message on filter not returning a function")
+is(msg, "filter tests/bad_filter2.lua returns a table, not a function", "error message on filter not returning a function")
 
 local badfilter, msg = lcmark.load_filter("tests/bad_filter3.lua")
 local doc, meta, msg = lcmark.convert("test", "html", {filters = {badfilter}})
 nok(doc, "trap runtime error raised by filter")
-like(msg, "Error running filter:\ntests/bad_filter3%.lua:2: attempt to perform arithmetic on .*local 'doc'", "error message on runtime error from filter")
+like(msg, "error running filter:\ntests/bad_filter3%.lua:2: attempt to perform arithmetic on .*local 'doc'", "error message on runtime error from filter")
 
 local count_links = lcmark.load_filter("filters/count_links.lua")
 ok(count_links, "loaded filter count_links.lua")

@@ -112,8 +112,8 @@ function lcmark.load_filter(filename)
     if type(evaluated) == 'function' then
         return evaluated
     else
-        return nil, ("Filter " .. filename .. " returns a " ..
-                    type(evaluated) .. ", not a function")
+        return nil, string.format("filter %s returns a %s, not a function",
+                                  filename, type(evaluated))
     end
   else
     return nil, msg
@@ -354,11 +354,11 @@ lcmark.compile_template = function(template_str)
 
   if fail_pos then
     local _, line_num = template_str:sub(1, fail_pos):gsub('[^\n\r]+', '')
-    return nil, string.format("parse failure at line %d: '%s'", line_num,
+    return nil, string.format("parse failure on line %d near '%s'", line_num,
                               template_str:sub(fail_pos, fail_pos + 40)
                              )
   elseif not compiled then
-    return nil, "parse failed at the end of the template"
+    return nil, "parse failure at the end of the template"
   else
     return compiled, nil
   end
@@ -396,7 +396,7 @@ end
 function lcmark.convert(inp, to, options)
   local writer = lcmark.writers[to]
   if not writer then
-    return nil, nil, ("Unknown output format " .. tostring(to))
+    return nil, nil, ("unknown output format '" .. tostring(to) .. "'")
   end
   local opts, columns, filters, yaml_metadata, yaml_parser
   if options then
@@ -419,14 +419,14 @@ function lcmark.convert(inp, to, options)
   if yaml_metadata then
     doc, meta = parse_document_with_metadata(inp, yaml_parser, opts)
     if not doc then
-      return nil, nil, ("YAML parsing error: " .. meta)
+      return nil, nil, ("YAML parsing error:\n" .. meta)
     end
   else
     doc = cmark.parse_string(inp, opts)
     meta = {}
   end
   if not doc then
-    return nil, nil, "Unable to parse document"
+    return nil, nil, "unable to parse document"
   end
   for _, f in ipairs(filters) do
     -- do we want filters to apply automatically to metadata?
@@ -434,7 +434,7 @@ function lcmark.convert(inp, to, options)
     -- walk_table(meta, function(node) f(node, meta, to) end, true)
     local ok, msg = pcall(function() f(doc, meta, to) end)
     if not ok then
-      return nil, nil, ("Error running filter:\n" .. msg)
+      return nil, nil, ("error running filter:\n" .. msg)
     end
   end
   local body = writer(doc, opts, columns)
