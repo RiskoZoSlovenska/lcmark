@@ -44,7 +44,7 @@ try_load("yaml", "eval")
 -- prints error messages if you try to index non-existent fields such as 'eval'
 
 
-local toOptions = function(opts)
+local function parse_options_table(opts)
   if type(opts) == 'table' then
     return (cmark.OPT_VALIDATE_UTF8 + cmark.OPT_NORMALIZE +
       (opts.smart and cmark.OPT_SMART or 0) +
@@ -121,7 +121,7 @@ function lcmark.load_filter(filename)
 end
 
 -- Render a metadata node in the target format.
-local render_metadata = function(node, writer, options, columns)
+local function render_metadata(node, writer, options, columns)
   local firstblock = cmark.node_first_child(node)
   if cmark.node_get_type(firstblock) == cmark.NODE_PARAGRAPH and
      not cmark.node_next(firstblock) then
@@ -143,7 +143,7 @@ end
 
 -- Iterate over the metadata, converting to cmark nodes.
 -- Returns a new table.
-local convert_metadata = function(table, options)
+local function convert_metadata_strings(table, options)
   return walk_table(table,
                     function(s)
                       if type(s) == "string" then
@@ -166,7 +166,7 @@ local yaml_block = re.compile([[
 
 -- Parses document with optional front YAML metadata; returns document,
 -- metadata.
-local parse_document_with_metadata = function(inp, parser, options)
+local function parse_document_with_metadata(inp, parser, options)
   local metadata = {}
   local meta_end = re.match(inp, yaml_block)
   if meta_end then
@@ -178,7 +178,7 @@ local parse_document_with_metadata = function(inp, parser, options)
         return nil, tostring(err)
       end
       if type(yaml_meta) == 'table' then
-        metadata = convert_metadata(yaml_meta, options)
+        metadata = convert_metadata_strings(yaml_meta, options)
         if type(metadata) ~= 'table' then
           metadata = {}
         end
@@ -208,7 +208,7 @@ function lcmark.apply_template(m, ctx)
   end
 end
 
-local get_value = function(ref, ctx)
+local function get_value(ref, ctx)
   local result = ctx
   assert(type(ref) == 'table')
   for _,varpart in ipairs(ref) do
@@ -223,7 +223,7 @@ local get_value = function(ref, ctx)
   return result
 end
 
-local set_value = function(ref, newval, ctx)
+local function set_value(ref, newval, ctx)
   local result = ctx
   assert(type(ref) == 'table')
   for i,varpart in ipairs(ref) do
@@ -239,13 +239,13 @@ local set_value = function(ref, newval, ctx)
   end
 end
 
-local is_truthy = function(val)
+local function is_truthy(val)
   local is_empty_tbl = type(val) == "table" and #val == 0
   return val and not is_empty_tbl
 end
 
 -- if s starts with newline, remove initial and final newline
-local trim = function(s)
+local function trim(s)
   if s:match("^[\r\n]") then
     return s:gsub("^[\r]?[\n]?", ""):gsub("[\r]?[\n]?$", "")
   else
@@ -253,7 +253,7 @@ local trim = function(s)
   end
 end
 
-local conditional = function(ref, ifpart, elsepart)
+local function conditional(ref, ifpart, elsepart)
   return function(ctx)
     local result
     if is_truthy(get_value(ref, ctx)) then
@@ -267,7 +267,7 @@ local conditional = function(ref, ifpart, elsepart)
   end
 end
 
-local forloop = function(ref, inner, sep)
+local function forloop(ref, inner, sep)
   return function(ctx)
     local val = get_value(ref, ctx)
     if not is_truthy(val) then
@@ -290,7 +290,7 @@ local forloop = function(ref, inner, sep)
   end
 end
 
-local variable = function(ref)
+local function variable(ref)
   return function(ctx)
     local val = get_value(ref, ctx)
     if is_truthy(val) then
@@ -344,7 +344,7 @@ local TemplateGrammar = re.compile([[
 -- Compiles a template string into an  arbitrary template object
 -- which can then be passed to `lcmark.apply_template()`.
 -- Returns the template object on success, or `nil, msg` on failure.
-lcmark.compile_template = function(template_str)
+function lcmark.compile_template(template_str)
   local compiled, fail_pos = re.match(template_str, TemplateGrammar)
 
   if fail_pos then
@@ -395,7 +395,7 @@ function lcmark.convert(inp, to, options)
   end
   local opts, columns, filters, yaml_metadata, yaml_parser
   if options then
-     opts = toOptions(options)
+     opts = parse_options_table(options)
      columns = options.columns or 0
      filters = options.filters or {}
      yaml_metadata = options.yaml_metadata

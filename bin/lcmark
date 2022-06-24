@@ -22,7 +22,7 @@ end
 -- working directory, then in `templates`, then in
 -- `$HOME/.lunamark/templates`, then in the Windows
 -- `APPDATA` directory.
-local find_template = function(name, to)
+local function find_template(name, to)
   if not name then
     return false, "Missing template name"
   end
