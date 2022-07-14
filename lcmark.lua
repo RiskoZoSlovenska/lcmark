@@ -208,10 +208,10 @@ function lcmark.apply_template(m, ctx)
   end
 end
 
-local get_value = function(var, ctx)
+local get_value = function(ref, ctx)
   local result = ctx
-  assert(type(var) == 'table')
-  for _,varpart in ipairs(var) do
+  assert(type(ref) == 'table')
+  for _,varpart in ipairs(ref) do
     if type(result) ~= 'table' then
       return nil
     end
@@ -223,21 +223,20 @@ local get_value = function(var, ctx)
   return result
 end
 
-local set_value = function(var, newval, ctx)
+local set_value = function(ref, newval, ctx)
   local result = ctx
-  assert(type(var) == 'table')
-  for i,varpart in ipairs(var) do
-    if i == #var then
+  assert(type(ref) == 'table')
+  for i,varpart in ipairs(ref) do
+    if i == #ref then
       -- last one
       result[varpart] = newval
     else
       result = result[varpart]
       if result == nil then
-        return nil
+        break
       end
     end
   end
-  return true
 end
 
 local is_truthy = function(val)
@@ -254,10 +253,10 @@ local trim = function(s)
   end
 end
 
-local conditional = function(var, ifpart, elsepart)
+local conditional = function(ref, ifpart, elsepart)
   return function(ctx)
     local result
-    if is_truthy(get_value(var, ctx)) then
+    if is_truthy(get_value(ref, ctx)) then
       result = lcmark.apply_template(ifpart, ctx)
     elseif elsepart then
       result = lcmark.apply_template(elsepart, ctx)
@@ -268,27 +267,23 @@ local conditional = function(var, ifpart, elsepart)
   end
 end
 
-local forloop = function(var, inner, sep)
+local forloop = function(ref, inner, sep)
   return function(ctx)
-    local val = get_value(var, ctx)
-    local vs
+    local val = get_value(ref, ctx)
     if not is_truthy(val) then
       return ""
     end
-    if type(val) == 'table' then
-      vs = val
-    else
-      -- if not a table, just iterate once
-      vs = {val}
+    if type(val) ~= 'table' then
+      val = {val} -- if not a table, just iterate once
     end
     local buffer = {}
-    for i,v in ipairs(vs) do
-      set_value(var, v, ctx) -- set temporary context
+    for i,elem in ipairs(val) do
+      set_value(ref, elem, ctx) -- set temporary context
       buffer[#buffer + 1] = lcmark.apply_template(inner, ctx)
-      if sep and i < #vs then
+      if sep and i < #val then
         buffer[#buffer + 1] = lcmark.apply_template(sep, ctx)
       end
-      set_value(var, val, ctx) -- restore original context
+      set_value(ref, val, ctx) -- restore original context
     end
     local result = lcmark.apply_template(buffer, ctx)
     return trim(result)
