@@ -63,8 +63,8 @@ end
 local function walk_table(table, callback, inplace)
   assert(type(table) == 'table')
   local new = {}
-  local res
   for k, v in pairs(table) do
+    local res
     if type(v) == 'table' then
       res = walk_table(v, callback, inplace)
     else
@@ -126,20 +126,20 @@ end
 local render_metadata = function(node, writer, options, columns)
   local firstblock = cmark.node_first_child(node)
   if cmark.node_get_type(firstblock) == cmark.NODE_PARAGRAPH and
-     not cmark.node_next(firstblock) then
-     -- render as inlines
-     local ils = cmark.node_new(cmark.NODE_CUSTOM_INLINE)
-     local b = cmark.node_first_child(firstblock)
-     while b do
-        local nextb = cmark.node_next(b)
-        cmark.node_append_child(ils, b)
-        b = nextb
-     end
-     local result = string.gsub(writer(ils, options, columns), "%s*$", "")
-     cmark.node_free(ils)
-     return result
+    not cmark.node_next(firstblock) then
+    -- render as inlines
+    local ils = cmark.node_new(cmark.NODE_CUSTOM_INLINE)
+    local b = cmark.node_first_child(firstblock)
+    while b do
+       local nextb = cmark.node_next(b)
+       cmark.node_append_child(ils, b)
+       b = nextb
+    end
+    local result = writer(ils, options, columns):match("(.-)%s*$")
+    cmark.node_free(ils)
+    return result
   else -- render as blocks
-     return writer(node, options, columns)
+    return writer(node, options, columns)
   end
 end
 
@@ -166,25 +166,20 @@ local yaml_block = yaml_begin_line * (yaml_content_line^1 + sp) * yaml_end_line
 -- Parses document with optional front YAML metadata; returns document,
 -- metadata.
 local parse_document_with_metadata = function(inp, parser, options)
-  local metadata = {}
+  local metadata
   local meta_end = lpeg.match(yaml_block, inp)
+  local meta_string = string.sub(inp, 1, meta_end - 1)
   if meta_end then
-    if meta_end then
-      local ok, yaml_meta, err = pcall(parser, string.sub(inp, 1, meta_end))
-      if not ok then
-        return nil, yaml_meta -- the error message
-      elseif not yaml_meta then -- parser may return nil, err instead of error
-        return nil, tostring(err)
-      end
-      if type(yaml_meta) == 'table' then
-        metadata = convert_metadata(yaml_meta, options)
-        if type(metadata) ~= 'table' then
-          metadata = {}
-        end
-        -- We insert blank lines where the header was, so sourcepos is accurate:
-        inp = string.gsub(string.sub(inp, 1, meta_end), '[^\n\r]+', '') ..
-           string.sub(inp, meta_end)
-      end
+    local ok, yaml_meta, err = pcall(parser, meta_string)
+    if not ok then
+      return nil, yaml_meta -- the error message
+    elseif not yaml_meta then -- parser may return nil, err instead of error
+      return nil, tostring(err)
+    end
+    if type(yaml_meta) == "table" then
+      metadata = convert_metadata(yaml_meta, options) or {}
+      -- Remove header but keep the newlines so that sourcepos is accurate:
+      inp = string.gsub(meta_string, "[^\n]+", "") .. string.sub(inp, meta_end)
     end
   end
   local doc = cmark.parse_string(inp, options)
@@ -246,8 +241,8 @@ end
 
 -- if s starts with newline, remove initial and final newline
 local trim = function(s)
-  if s:match("^[\r\n]") then
-    return s:gsub("^[\r]?[\n]?", ""):gsub("[\r]?[\n]?$", "")
+  if s:match("^\r?\n") then
+    return s:gsub("^\r?\n", ""):gsub("\r?\n$", "")
   else
     return s
   end
